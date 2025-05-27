@@ -1,25 +1,24 @@
 ---
-title: "Test"
+title: "Ćwiczenia z przedmiotu ZRiSKW"
 author: "Oliwia Grądzka"
 format: gfm
 ---
-## Quarto
+## Intro
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+Repozytorium ćwiczeń z projektów ML wykonywanych zgodnie z filozofią tidymodels.
 
-## Running Code
+## Dobre praktyki
 
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+* .gitignore ('*.rozszerzenie', 'folder /', '/.quarto/')
+* nie generuj folderu plików pomocniczych przy renderowaniu quarto ('self-contained: true' i 'embed-resources: true')
+* Rstudio tools -> git -> sign (puste)
+* cache - przyspiesza renderowanie dokumentów
+* gmd -> md ('format: gfm')
 
-```{r}
-1 + 1
-```
+## Commit pull push
 
-You can add options to executable code like this 
+## Branch
 
-```{r}
-#| echo: false
-2 * 2
-```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+
+
