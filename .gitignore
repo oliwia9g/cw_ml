@@ -9,6 +9,7 @@
 # User-specific files
 .Ruserdata
 *.Rproj
+*.Rdata
 
 # Example code in package build process
 *-Ex.R
@@ -51,3 +52,9 @@ rsconnect/
 
 # Ignore quarto files
 /.quarto/
+
+# Ignore html files
+*.html
+
+# Ignore cache qmd
+README_cache/

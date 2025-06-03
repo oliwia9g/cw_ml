@@ -10,7 +10,7 @@ Repozytorium ćwiczeń z projektów ML wykonywanych zgodnie z filozofią tidymod
 ## Dobre praktyki
 
 * .gitignore ('*.rozszerzenie', 'folder /', '/.quarto/')
-* nie generuj folderu plików pomocniczych przy renderowaniu quarto ('self-contained: true' i 'embed-resources: true')
+* nie generuj folderu plików pomocniczych przy renderowaniu quarto ('self-contained: true' i 'embed-resources: true') i nie możemy właczyc funkcji 'cache'
 * Rstudio tools -> git -> sign (puste)
 * cache - przyspiesza renderowanie dokumentów
 * gmd -> md ('format: gfm')
