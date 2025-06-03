@@ -8,13 +8,13 @@ tidymodels.
 
 ## Dobre praktyki
 
-- .gitignore (’\*.rozszerzenie’, ‘folder /’, ‘/.quarto/’)
+- .gitignore (`*.rozszerzenie`, `folder /`, `/.quarto/`)
 - nie generuj folderu plików pomocniczych przy renderowaniu quarto
-  (‘self-contained: true’ i ‘embed-resources: true’) i nie możemy
-  właczyc funkcji ‘cache’
+  (`self-contained: true` i `embed-resources: true`) i nie możemy
+  właczyc funkcji `cache`
 - Rstudio tools -\> git -\> sign (puste)
 - cache - przyspiesza renderowanie dokumentów
-- gmd -\> md (‘format: gfm’)
+- gmd -\> md (`format: gfm`)
 
 ## Commit pull push
 
