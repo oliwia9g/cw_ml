@@ -216,3 +216,238 @@ ggplot(urchins,
   labs(x = "Volume", y = "Width")         # etc
 ```
 
+## Ćwiczenie 1
+
+### Pakiety
+
+```{r}
+#| eval: true
+library(tidyverse)
+library(dplyr)
+library(GGally)
+
+```
+
+### Przygotowanie danych
+
+```{r}
+#| eval: true
+data("airquality"); 
+colnames(airquality) <- tolower(colnames(airquality))
+
+air <-
+  airquality |>
+  as_tibble() |>
+  na.omit() |> 
+  select(-day) |> 
+  mutate(month = factor(month))
+air
+```
+
+### Zależności między zmiennymi
+
+```{r}
+#| eval: true
+glimpse(air)
+summary(air)
+GGally::ggpairs(air)
+```
+
+#### Wnioski
+Ozone:
+
+* Wykazuje silną dodatnią korelację z temp
+
+* Wykazuje umiarkowaną ujemną korelację z wind 
+
+* Rozkład jest prawostronnie skośny
+
+Solar.R:
+
+* Słabsze korelacje z innymi zmiennymi
+
+* Rozkład zbliżony do normalnego
+
+Wind:
+
+* Ujemna korelacja z temp i ozone
+
+* Rozkład zbliżony do normalnego
+
+Temp:
+
+* Silna dodatnia korelacja z ozone
+* Ujemna korelacja z wind
+* Rozkład zbliżony do normalnego
+
+Month (kategoryczna):
+
+* Widać wyraźne różnice w rozkładach innych zmiennych między miesiącami, np. średnie ozone rośnie od maja do sierpnia
+
+### Budowa modelu liniowego O3 (MNK)
+
+```{r}
+#| eval: true
+model <- lm(ozone ~ solar.r + wind + temp + month, data = air)
+summary(model)
+
+par(mfrow = c(2, 2))
+plot(model)
+```
+
+#### Ogólna charakterystyka modelu
+
+Zmienna zależna: `ozone`
+
+Zmienne objaśniające: `solar.r`, `wind`, `temp`, `month`
+
+Liczba obserwacji: 111 (103 stopnie swobody po usunięciu braków danych)
+
+Jakość dopasowania:
+
+* R² = 0.6369 – model wyjaśnia ~63.7% zmienności stężenia ozonu.
+
+* Skorygowane R² = 0.6122 – uwzględnia liczbę zmiennych.
+
+* Residual standard error = 20.72 – średni błąd predykcji wynosi ~20.72 ppb (części na miliard).
+
+#### Wnioski z współczynników
+
+Czynniki istotne statystycznie (p < 0.05):
+
+* `temp` (β = 1.875, p < 0.001) – każdy wzrost temperatury o 1°F zwiększa ozone o ~1.88 ppb.
+
+* `wind` (β = -3.109, p < 0.001) – każdy wzrost prędkości wiatru o 1 mph zmniejsza ozone o ~3.11 ppb.
+
+* `solar.r` (β = 0.052, p = 0.03) – słabszy wpływ, ale istotny.
+
+* `month9` (wrzesień vs. maj) – istotnie niższe stężenie (β = -15.97, p = 0.018).
+
+Miesiące nieistotne:
+
+czerwiec (month6), lipiec (month7), sierpień (month8) – ich wpływ nie jest statystycznie istotny w porównaniu z majem.
+
+#### Diagnostyka reszt
+
+Rozkład reszt:
+
+* Min: -40.34, Max: 92.69 – asymetria (możliwe odstające wartości wysokiego ozonu).
+
+* Mediana: -3.165 – blisko zera, ale rozkład prawdopodobnie prawostronnie skośny.
+
+#### Ogólna ocena modelu
+
+* Wysoka istotność temp i wind (potwierdza teorię, że ozon rośnie z temperaturą, a maleje z wiatrem).
+
+* Model istotny statystycznie (F-statistic = 25.81, p < 0.001).
+
+* Nieliniowość reszt (możliwa potrzeba transformacji ozone, np. logarytmicznej).
+
+* Słabsze dopasowanie dla miesięcy (tylko wrzesień istotny).
+
+### Predykcja dla nowych danych
+
+```{r}
+#| eval: true
+new_air <- data.frame(
+  solar.r = c(150, 200, 250),
+  wind = c(8, 10, 12),
+  temp = c(70, 75, 80),
+  month = factor(c(5, 6, 7)))
+  
+predictions <- predict(model, newdata = new_air, interval = 'confidence')
+predictions
+```
+
+### Porównanie 
+
+```{r}
+#| eval: true
+barplot(predictions[,"fit"], 
+        names.arg = c("Maj", "Czerwiec", "Lipiec"),
+        ylab = "Prognozowane O3 (ppb)",
+        main = "Prognoza stężenia ozonu",
+        ylim = c(0,60))
+arrows(x0 = 1:3, y0 = predictions[,"lwr"],
+       x1 = 1:3, y1 = predictions[,"upr"],
+       angle = 90, code = 3, length = 0.1)
+```
+
+#### Pierwsza obserwacja (month=5)
+
+* Promieniowanie (solar.r): 150
+
+* Wiatr (wind): 8 mph
+
+* Temperatura (temp): 70°F
+
+Prognoza:
+
+* Średnie O3: 39.99 ppb
+
+* Przedział 95% ufności: [30.40, 49.58] ppb
+
+Wnioski:
+
+Typowe stężenie dla umiarkowanych warunków, szeroki przedział ufności (±~9.6 ppb) wskazuje na znaczną niepewność.
+
+#### Druga obserwacja (month=6)
+
+* solar.r: 200 (+50 vs obs. 1)
+
+* wind: 10 mph (+2)
+
+* temp: 75°F (+5)
+
+Prognoza:
+
+* Średnie O3: 31.00 ppb (niższe niż maj!)
+
+* Przedział: [16.59, 45.40] ppb
+
+Wnioski:
+
+Mimo wzrostu temp i solar.r, O3 spada. Wynika to z silnego negatywnego efektu czerwca w modelu (coef: -14.76) Dodatkowo ekstremalnie szeroki przedział ufności (±~14.4 ppb) - model ma problem z tą kombinacją.
+
+c) Trzecia obserwacja (month=7)
+
+* solar.r: 250 (+100 vs obs. 1)
+
+* wind: 12 mph (+4)
+
+* temp: 80°F (+10)
+
+Prognoza:
+
+* Średnie O3: 42.78 ppb (najwyższe)
+
+* Przedział: [33.44, 52.11] ppb
+
+Wnioski:
+
+Silny wzrost temperatury przeważył efekt wiatru. Lipiec ma mniejszy negatywny efekt niż czerwiec (coef: -8.75 vs -14.76).
+
+#### Podsumowanie predykcji
+Niespójność sezonowa:
+
+* Maj: 39.99 ppb
+
+* Czerwiec: 31.00 ppb (spadek)
+
+* Lipiec: 42.78 ppb (wzrost)
+
+Wskazuje na potencjalny problem z modelem
+
+Wpływ zmiennych:
+
+* Temp: silny pozytywny efekt (coef: ~1.88)
+
+* Wiatr: negatywny efekt (coef: ~-3.11)
+
+* Solar.r: słaby pozytywny (coef: ~0.05)
+
+Jakość predykcji:
+
+* Najlepsza dla lipca (węższy przedział)
+
+* Najgorsza dla czerwca (bardzo szeroki przedział)
