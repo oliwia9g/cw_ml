@@ -510,5 +510,261 @@ air |> count(ozone)
 
 ### Model regresji logistycznej
 
-do zrobienia 
+#### Pakiety
+```{r}
+#| eval: true
+library(tidymodels) 
+library(skimr) 
+library(GGally) 
+library(openair) 
+library(ggpubr)
+library(patchwork)
+tidymodels_prefer()
+```
 
+#### Przygotowanie danych
+```{r}
+#| eval: true
+air <- mydata |> 
+  selectByDate(year=2002) |> 
+  na.omit() 
+
+summary(air$o3)
+
+air <- air |>
+  mutate(ozone = cut(
+    o3,
+    breaks = c(-0.1, 10, 53),
+    labels = c("Niskie", "Wysokie")
+  ))
+
+air |> count(ozone)
+
+```
+
+#### Ocena zmiennych
+```{r}
+#| eval: true
+zmienne <- air |> 
+  select(ozone, pm25, co, so2, pm10, no2, nox, wd, ws)
+```
+
+```{r}
+#| eval: true
+zmienne |> 
+  select(-ozone) |> 
+  pivot_longer(everything(), names_to = "variable", values_to = "value") |> 
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "magenta3") +
+  facet_wrap(~variable, scales = "free") +
+  labs(title = "Rozkład zmiennych objaśniających")
+```
+
+**Wykresy rozkładów zmiennych objaśniających**
+
+Zmienne `nox`, `no2`, `co`, `pm25`, `so2`, `ws` mają rozkłady prawostronnie skośne.
+
+```{r}
+#| eval: true
+zmienne |> 
+  pivot_longer(-ozone, names_to = "variable", values_to = "value") |> 
+  ggplot(aes(x = ozone, y = value, fill = ozone)) +
+  geom_boxplot() +
+  facet_wrap(~variable, scales = "free_y") +
+  labs(title = "Porównanie rozkładów względem ozonu")
+```
+
+**Rozkłady zmiennych względem ozonu**
+
+Zmienne `nox`, `no2`, `co` mają wyraźnie wyższe wartości dla niskiego poziomu ozonu, co oznacza ujemną korelację.
+
+Zmienne `pm25`, `pm10`, `so2` również mają wyższe wartości dla niskiego poziomu ozonu, jednak różnica miedzy jedną grupą a drugą jest słaba.
+
+Zmienne `wd` i `ws` mają wyższe wartości dla wysokiego poziomu ozonu - korelacja dodatnia.
+
+```{r}
+#| eval: true
+# sprawdzenie korelacji z ozonem
+
+cor <- zmienne |> 
+  mutate(ozone_num = as.numeric(ozone) - 1) |>  
+  select(-ozone) |> 
+  cor(use = "complete.obs") |> 
+  as.data.frame() |> 
+  rownames_to_column("zmienna") |> 
+  filter(zmienna != "ozone_num") |> 
+  select(zmienna, korelacja_z_ozonem = ozone_num) |> 
+  arrange(desc(abs(korelacja_z_ozonem)), korelacja_z_ozonem) |> 
+  mutate(korelacja_z_ozonem = round(korelacja_z_ozonem, 4))
+
+# korelacja nox i no2
+nox_no2_cor <- cor(air$nox, air$no2, use = "complete.obs")
+
+top3zmienne <- cor |> 
+  head(3) |> 
+  pull(zmienna)
+
+list(
+  cor_tabela = knitr::kable(cor, digits = 2),
+  top3_zmienne = top3zmienne
+)
+
+```
+
+**Czy zmienne date, wd, pm10, pm25, so2, coś wnoszą coś do modelu?**
+
+`date`: Nie, jest zmienną czasową i nie ma związku z procesami chemicznymi tworzenia ozonu.
+
+`wd`: (kierunek wiatru): Nie, brak istotnych różnic w rozkładach, korelacja = 0.08.
+
+`pm10/pm25`: Nie, słabe korelacje (-0.29/-0.34) i mało wyraźne różnice w boxplotach.
+
+`so2`: Nie, niska korelacja (-0.37) i brak silnego związku z ozonem.
+
+`co`: Tak/Nie, ma wysoką korelację (-0.44), ale jest silnie związany z nox/no2.
+
+**Jak potraktować no2 i nox?**
+
+Korelacja zmiennych `no2` i `nox` wynosi ok. **0.84**, co oznacz ich współliniowość. W takim wypadku zdecydowałam się wybrać zmienną `nox`, ponieważ ma wyższą korelację z ozonem. 
+
+Ostatecznie do modelu wybrałam zmienną `nox` i `ws`. `ws` nie jest silnie skorelowana z `nox`, ale jest zmienną z dodatnią korelacją z ozonem. 
+
+#### Budowanie modelu
+
+```{r}
+#| eval: true
+set.seed(222)
+air_split <- initial_split(air, strata = "ozone", prop = 0.7)
+air_train <- training(air_split)
+air_test <- testing(air_split)
+
+rec <- recipe(ozone ~ nox + ws, data = air_train) |> 
+  step_YeoJohnson(all_numeric_predictors()) |>  
+  step_normalize(all_numeric_predictors()) 
+
+model <- logistic_reg() |> 
+  set_engine("glm") |> 
+  set_mode("classification")
+
+workflow <- workflow() |> 
+  add_recipe(rec) |> 
+  add_model(model)
+
+model_fit <- fit(workflow, data = air_train)
+
+```
+
+
+**Czy stosować przekształcenia boxCox lub YeoJohnson - dla jakich zmiennych?**
+
+Można zastosować przekształcenie YeoJohnson, ponieważ rozkłady moich zmiennych są skośne oraz występują wartości zero - BoxCox wymaga wartości dodatnich.
+
+**Czy normalizacja zmiennych numerycznych jest potrzebna ?**
+
+W tym przypadku trzeba zachować spójność po przekształceniu YeoJohnson, które sprawia, że zmienne tracą swoją oryginalną jednostkę. Normalizacja pomaga ujednolicić skalę oraz ułatwia interpetację wyników. 
+
+
+#### Ocena modelu
+
+```{r}
+#| eval: true
+ocena_modelu <- air_test |> 
+  bind_cols(
+    predict(model_fit, new_data = air_test),
+    predict(model_fit, new_data = air_test, type = "prob"))
+
+macierz_bledow <- conf_mat(ocena_modelu, truth = ozone, estimate = .pred_class)
+print(macierz_bledow)
+
+metryki <- metric_set(accuracy, sensitivity, specificity, precision, recall, f_meas)
+
+metryki_wynik <- metryki(
+  ocena_modelu,
+  truth = ozone,
+  estimate = .pred_class,
+  .pred_Niskie
+) |> 
+  mutate(.estimate = round(.estimate, 3))
+print(metryki_wynik)
+
+wspolczynniki <- tidy(model_fit) |> 
+  mutate(p.value = round(p.value, 4))
+print(wspolczynniki)
+
+```
+
+**Macierz błędów**
+
+True Negative - 1628, model poprawnie przewidział niskie stężenie ozonu w 1628 przypadkach.
+
+False Positive - 185, model błędnie sklasyfikował wysokie stężenie jako niskie.
+
+False Negative - 101, model błędnie sklasyfikował niskie stężenie jako wysokie.
+
+True Positive - 354, model poprawnie przewdział wysokie stężenie ozonu w 354 przypadkach.
+
+Moj model lepiej poradził sobie w identyfikacji niskich stężeń ozonu. Duża liczba FP wskazuje na to, że model myli wysokie stężenia z niskimi.
+
+**Metryki**
+
+Accuracy - poprawna klasyfikacja 87.4% wszystkich przypadków.
+
+Sensitivity - wykrycie 94.2% przypadków wysokiego ozonu.
+
+Specificity - tylko 65.7% niskich stężeń zostało poprawnie zidentyfikowanych.
+
+Precision - w 89.8% model ma rację przewidując wysokie stężenia.
+
+F1-score - wartość bliska 1 (91.9%) wskazuje na dobrą równowagę miedzy precyzją i czułością.
+
+**Współczynniki**
+
+NOx - Silny ujemny wpływ na stężenie ozonu.
+
+WS - Wyższa prędkość wiatru zwiększa szanse na wysokie stężenie ozonu.
+
+Obie zmienne są istotne statystycznie.
+
+**Model jest skuteczny, jednak specyficzność jest niska. Warto dodać inne zmienne, które mogą ją poprawić, np. temperatura.**
+
+```{r}
+#| eval: true
+wykres_fit <- ggplot(ocena_modelu, aes(x = nox, y = as.numeric(ozone) - 1)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
+              se = FALSE, color = "steelblue") +
+  labs(title = "Dopasowanie modelu do danych",
+       x = "Standaryzowane NOx",
+       y = "Prawdopodobieństwo wysokiego ozonu") +
+  theme_minimal()
+wykres_fit
+```
+
+**Wykres dopasowania modelu**
+
+Krzywa wyraźnie opada, co potwierdza, że wyższe stężenie NOx zmniejsza prawdopodobieństwo wysokiego ozonu. Jest to prawda – NOx reaguje z ozonem, redukując jego stężenie.
+
+Dla niskich wartości NOx prawdopodobieństwo wysokiego ozonu sięga 75–100%, a dla wysokich NOx spada do 0–25%.
+
+Wartości skrajne są jednoznacznie klasyfikowane, a wartości bliskie średniej wymagają dodatkowych zmiennych dla precyzyjniejszej prognozy.
+
+```{r}
+#| eval: true
+wykres_prawdopodobienstw <- ggplot(ocena_modelu, aes(x = .pred_Niskie, fill = ozone)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Rozkład predykowanych prawdopodobieństw",
+       x = "Prawdopodobieństwo niskiego ozonu",
+       y = "Gęstość") +
+  theme_minimal()
+wykres_prawdopodobienstw
+```
+
+**Wykres rozkładu prawdopodobieństw**
+
+Niski ozon: Rozkład skoncentrowany po prawej stronie - wysokie prawopodobieństwa, co oznacza, że model często poprawnie przewiduje niskie stężenia.
+
+Wysoki ozon: Rozkład przesunięty w lewo - niskiee prawdopodobieństwa, co pokazuje, że model rzadko myli wysokie stężenia z niskimi.
+
+Obszar 0.4–0.6 jest niepewny, model może błędnie klasyfikować przypadki.
+
+Ogólnie model dobrze separuje klasy – większość przewidywań skupia się po przeciwnych stronach wykresu. Nakładanie się w środkowym zakresie sugeruje, że dla niektórych przypadków model może wymagać dodatkowych zmiennych lub dostrojenia progu klasyfikacji.
