@@ -663,3 +663,85 @@ Obszar 0.4–0.6 jest niepewny, model może błędnie klasyfikować przypadki.
 
 Ogólnie model dobrze separuje klasy – większość przewidywań skupia się po przeciwnych stronach wykresu. Nakładanie się w środkowym zakresie sugeruje, że dla niektórych przypadków model może wymagać dodatkowych zmiennych lub dostrojenia progu klasyfikacji.
 
+### Ćwiczenie 3
+
+#### Pakiety
+
+```{r}
+#| eval: true
+library(tidymodels)
+library(tidyverse)
+library(ranger)
+```
+
+#### Przygotowanie danych + przepis - takie jak w ćw 2
+
+```{r}
+#| eval: true
+air_train <- training(initial_split(air, strata = "ozone", prop = 0.7))
+
+rec <- recipe(ozone ~ nox + ws, data = air_train) |> 
+  step_YeoJohnson(all_numeric_predictors()) |> 
+  step_normalize(all_numeric_predictors())
+
+```
+
+#### Definiowanie modeli
+
+```{r}
+#| eval: true
+logistic_model <- logistic_reg() |> 
+  set_engine("glm") |> 
+  set_mode("classification")
+
+rf_model <- rand_forest() |> 
+  set_engine("ranger", importance = "impurity") |> 
+  set_mode("classification")
+
+```
+
+#### Kroswalidacja CV
+
+```{r}
+#| eval: true
+cv_split <- vfold_cv(air_train, v = 5, strata = "ozone")
+
+ocena <- function(model, resamples) {
+  workflow() |> 
+    add_recipe(rec) |> 
+    add_model(model) |> 
+    fit_resamples(
+      resamples = resamples,
+      metrics = metric_set(accuracy, sensitivity, specificity, roc_auc)
+    )}
+
+logistic_cv <- ocena(logistic_model, cv_split)
+rf_cv <- ocena(rf_model, cv_split)
+
+```
+
+#### Kroswalidacja V-fold CV
+
+```{r}
+#| eval: true
+vfold_split <- vfold_cv(air_train, v = 20, strata = "ozone")
+
+logistic_vfold <- ocena(logistic_model, vfold_split)
+rf_vfold <- ocena(rf_model, vfold_split)
+
+```
+
+#### Bootstrap
+
+```{r}
+#| eval: true
+bstrap_split <- bootstraps(air_train, times = 20, strata = "ozone")
+
+logistic_bstrap <- ocena(logistic_model, bstrap_split)
+rf_bstrap <- ocena(rf_model, bstrap_split)
+
+```
+
+#### Podsumowanie
+
+
