@@ -346,86 +346,6 @@ lm_pred |>
 
 Lipiec ma najwyższe prognozowane stężenie ozonu z powodu wysokiej temperatury. Czerwiec osiągnął najsłabszy wynik, mimo umiarkowanej pogody, a maj ma wynik pośredni. Przedziały ufności są szerokie, model nie jest precyzyjny.
 
-<<<<<<< HEAD
-#### Pierwsza obserwacja (month=5)
-
-* Promieniowanie (solar.r): 150
-
-* Wiatr (wind): 8 mph
-
-* Temperatura (temp): 70°F
-
-Prognoza:
-
-* Średnie O3: 39.99 ppb
-
-* Przedział 95% ufności: [30.40, 49.58] ppb
-
-Wnioski:
-
-Typowe stężenie dla umiarkowanych warunków, szeroki przedział ufności (±~9.6 ppb) wskazuje na znaczną niepewność.
-
-#### Druga obserwacja (month=6)
-
-* solar.r: 200 (+50 vs obs. 1)
-
-* wind: 10 mph (+2)
-
-* temp: 75°F (+5)
-
-Prognoza:
-
-* Średnie O3: 31.00 ppb (niższe niż maj!)
-
-* Przedział: [16.59, 45.40] ppb
-
-Wnioski:
-
-Mimo wzrostu temp i solar.r, O3 spada. Wynika to z silnego negatywnego efektu czerwca w modelu (coef: -14.76) Dodatkowo ekstremalnie szeroki przedział ufności (±~14.4 ppb) - model ma problem z tą kombinacją.
-
-c) Trzecia obserwacja (month=7)
-
-* solar.r: 250 (+100 vs obs. 1)
-
-* wind: 12 mph (+4)
-
-* temp: 80°F (+10)
-
-Prognoza:
-
-* Średnie O3: 42.78 ppb (najwyższe)
-
-* Przedział: [33.44, 52.11] ppb
-
-Wnioski:
-
-Silny wzrost temperatury przeważył efekt wiatru. Lipiec ma mniejszy negatywny efekt niż czerwiec (coef: -8.75 vs -14.76).
-
-#### Podsumowanie predykcji
-Niespójność sezonowa:
-
-* Maj: 39.99 ppb
-
-* Czerwiec: 31.00 ppb (spadek)
-
-* Lipiec: 42.78 ppb (wzrost)
-
-Wskazuje na potencjalny problem z modelem
-
-Wpływ zmiennych:
-
-* Temp: silny pozytywny efekt (coef: ~1.88)
-
-* Wiatr: negatywny efekt (coef: ~-3.11)
-
-* Solar.r: słaby pozytywny (coef: ~0.05)
-
-Jakość predykcji:
-
-* Najlepsza dla lipca (węższy przedział)
-
-* Najgorsza dla czerwca (bardzo szeroki przedział)
-
 
 ## Ćwiczenie 2
 
@@ -742,6 +662,4 @@ Wysoki ozon: Rozkład przesunięty w lewo - niskiee prawdopodobieństwa, co poka
 Obszar 0.4–0.6 jest niepewny, model może błędnie klasyfikować przypadki.
 
 Ogólnie model dobrze separuje klasy – większość przewidywań skupia się po przeciwnych stronach wykresu. Nakładanie się w środkowym zakresie sugeruje, że dla niektórych przypadków model może wymagać dodatkowych zmiennych lub dostrojenia progu klasyfikacji.
-=======
-Model nie spełnia w pełni założenia normalności, wyniki trzeba interpretować ostrożnie. Mimo to, model oddaje główne zależności między zmiennymi.
->>>>>>> origin/main
+
