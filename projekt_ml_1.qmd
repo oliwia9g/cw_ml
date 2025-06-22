@@ -663,18 +663,19 @@ Obszar 0.4–0.6 jest niepewny, model może błędnie klasyfikować przypadki.
 
 Ogólnie model dobrze separuje klasy – większość przewidywań skupia się po przeciwnych stronach wykresu. Nakładanie się w środkowym zakresie sugeruje, że dla niektórych przypadków model może wymagać dodatkowych zmiennych lub dostrojenia progu klasyfikacji.
 
-### Ćwiczenie 3
+## Ćwiczenie 3
 
-#### Pakiety
+### Pakiety
 
 ```{r}
 #| eval: true
 library(tidymodels)
 library(tidyverse)
 library(ranger)
+library(knitr)
 ```
 
-#### Przygotowanie danych + przepis - takie jak w ćw 2
+### Przygotowanie danych + przepis - takie jak w ćw 2
 
 ```{r}
 #| eval: true
@@ -686,7 +687,7 @@ rec <- recipe(ozone ~ nox + ws, data = air_train) |>
 
 ```
 
-#### Definiowanie modeli
+### Definiowanie modeli
 
 ```{r}
 #| eval: true
@@ -700,7 +701,7 @@ rf_model <- rand_forest() |>
 
 ```
 
-#### Kroswalidacja CV
+### Kroswalidacja CV
 
 ```{r}
 #| eval: true
@@ -720,7 +721,7 @@ rf_cv <- ocena(rf_model, cv_split)
 
 ```
 
-#### Kroswalidacja V-fold CV
+### Kroswalidacja V-fold CV
 
 ```{r}
 #| eval: true
@@ -731,7 +732,7 @@ rf_vfold <- ocena(rf_model, vfold_split)
 
 ```
 
-#### Bootstrap
+### Bootstrap
 
 ```{r}
 #| eval: true
@@ -742,6 +743,96 @@ rf_bstrap <- ocena(rf_model, bstrap_split)
 
 ```
 
-#### Podsumowanie
+### Podsumowanie
 
+```{r}
+#| eval: true
+wyniki_resampling <- bind_rows(
+  collect_metrics(logistic_cv) |> mutate(model = "Reg. log.", metoda = "5-CV"),
+  collect_metrics(rf_cv) |> mutate(model = "Random forest", metoda = "5-CV"),
+  collect_metrics(logistic_vfold) |> mutate(model = "Reg. log.", metoda = "20-CV"),
+  collect_metrics(rf_vfold) |> mutate(model = "Random forest", metoda = "20-CV"),
+  collect_metrics(logistic_bstrap) |> mutate(model = "Reg. log.", metoda = "Bootstrap"),
+  collect_metrics(rf_bstrap) |> mutate(model = "Random forest", metoda = "Bootstrap"))
+
+resampling_podsumowanie <- wyniki_resampling |> 
+  select(model, metoda, .metric, mean, std_err) |> 
+  pivot_wider(names_from = .metric, values_from = c(mean, std_err)) |> 
+  arrange(model, metoda)
+
+kable(resampling_podsumowanie, digits = 3, caption = "Porównanie wyników reamplingu dla różnych modeli i metod")
+
+```
+
+Regresja logistyczna osiągnęła lepsze wyniki pod względem dokładności i stabilności - ROC AUC = 0.920. Las losowy ma niższą dokładność i specyficzność, ale również bardzo dobre wyniki - utrzymuje bardzo wysoką czułość. Metoda Bootstrap zapewnia najniższe błędy standardowe, a 20CV szczególnie przy Random Forest poprawiło accuracy i specificy względem 5CV. 
+
+```{r}
+#| eval: true
+# obliczam ROC AUC dla danych testowych do porownania (w cw. 2 tego nie uwzglednilam)
+
+ocena_modelu <- ocena_modelu |> 
+  mutate(.pred_Wysokie = 1 - .pred_Niskie)
+
+ocena_modelu$ozone <- factor(ocena_modelu$ozone, levels = c("Niskie", "Wysokie"))
+
+roc_auc_test <- roc_auc(
+  data = ocena_modelu,
+  truth = ozone,
+  .pred_Wysokie,
+  event_level = "second"
+) |> 
+  mutate(
+    model = "Reg. log. (test)",
+    metoda = "Podział 70/30"
+  )
+
+metryki_test <- metryki_wynik |> 
+    mutate(
+      model = "Reg. log. (test)",
+      metoda = "Podział 70/30"
+    )
+
+metryki_test <- bind_rows(metryki_test, roc_auc_test)
+metryki_full <- metric_set(accuracy, sensitivity, specificity, precision, recall, f_meas, roc_auc)
+
+ocena_z_metrykami <- function(model, resamples) {
+  workflow() |> 
+    add_recipe(rec) |> 
+    add_model(model) |> 
+    fit_resamples(
+      resamples = resamples,
+      metrics = metryki_full
+    )
+}
+
+logistic_cv <- ocena_z_metrykami(logistic_model, cv_split)
+logistic_vfold <- ocena_z_metrykami(logistic_model, vfold_split)
+logistic_bstrap <- ocena_z_metrykami(logistic_model, bstrap_split)
+
+extract_metrics <- function(resample, metoda) {
+  collect_metrics(resample) |> 
+    filter(.metric %in% c("accuracy", "sensitivity", "specificity", "precision", "recall", "f_meas", "roc_auc")) |> 
+    select(.metric, .estimate = mean) |> 
+    mutate(
+      model = "Reg. log. (resampling)",
+      metoda = metoda
+    )
+}
+
+metryki_cv5 <- extract_metrics(logistic_cv, "5-fold CV")
+metryki_cv20 <- extract_metrics(logistic_vfold, "20-fold CV")
+metryki_boot <- extract_metrics(logistic_bstrap, "Bootstrap")
+
+metryki_all <- bind_rows(metryki_test, metryki_cv5, metryki_cv20, metryki_boot)
+
+tabela_porownawcza <- metryki_all |> 
+  pivot_wider(names_from = .metric, values_from = .estimate) |> 
+  arrange(model, metoda)
+
+
+kable(tabela_porownawcza, digits = 3, caption = "Porównanie metryk: zestaw testowy vs reampling")
+
+```
+
+Wyniki modelu regresji logistycznej są bardzo dobre – zarówno na zbiorze testowym, jak i w walidacji resamplingowej. Model osiąga wysoką dokładność ok. 87%, świetną czułość ok. 94% oraz wysoką wartość ROC AUC ok. 0.92, co oznacza skuteczne rozróżnianie klas. Specyficzność jest nieco niższa ok. 66%. Spójność wyników testowych i resamplingowych świadczy o dobrej generalizacji modelu.
 
