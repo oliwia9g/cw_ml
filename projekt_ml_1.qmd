@@ -346,4 +346,493 @@ lm_pred |>
 
 Lipiec ma najwyższe prognozowane stężenie ozonu z powodu wysokiej temperatury. Czerwiec osiągnął najsłabszy wynik, mimo umiarkowanej pogody, a maj ma wynik pośredni. Przedziały ufności są szerokie, model nie jest precyzyjny.
 
-Model nie spełnia w pełni założenia normalności, wyniki trzeba interpretować ostrożnie. Mimo to, model oddaje główne zależności między zmiennymi.
+
+## Ćwiczenie 2
+
+### Wprowadzenie z konspektu
+```{r}
+#| eval: true
+library(tidymodels) 
+library(skimr) 
+library(GGally) 
+library(openair) 
+library(ggpubr)
+tidymodels_prefer()
+```
+
+```{r}
+#| eval: true
+air <- mydata |> selectByDate(year = 2002) 
+air |> skim() 
+air <- air |> na.omit()
+
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggpairs()
+
+# wykres regresji liniowej, do sprawdzenia danych 
+set.seed(222)
+air[sample(1:nrow(air), size = 300, replace = F),] |> 
+  select(nox, no2) |> 
+  ggplot(aes(nox, no2)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = T, formula = y ~ x) + 
+  stat_cor(label.x = 10, label.y = 80) + 
+  stat_regline_equation(label.x = 10, label.y = 82) +
+  theme_bw()
+
+air |>    
+  ggplot(aes(date, o3)) +     
+  geom_line() +     
+  theme_bw()
+
+air |> 
+  pull(o3) |> 
+  range()  
+
+air <-
+  air |>
+  mutate(ozone = cut(
+    o3,
+    breaks = c(-0.1, 10, 53),
+    labels = c("Niskie", "Wysokie")
+  ))
+
+air |> count(ozone)
+```
+
+### Model regresji logistycznej
+
+#### Pakiety
+```{r}
+#| eval: true
+library(tidymodels) 
+library(skimr) 
+library(GGally) 
+library(openair) 
+library(ggpubr)
+library(patchwork)
+tidymodels_prefer()
+```
+
+#### Przygotowanie danych
+```{r}
+#| eval: true
+air <- mydata |> 
+  selectByDate(year=2002) |> 
+  na.omit() 
+
+summary(air$o3)
+
+air <- air |>
+  mutate(ozone = cut(
+    o3,
+    breaks = c(-0.1, 10, 53),
+    labels = c("Niskie", "Wysokie")
+  ))
+
+air |> count(ozone)
+
+```
+
+#### Ocena zmiennych
+```{r}
+#| eval: true
+zmienne <- air |> 
+  select(ozone, pm25, co, so2, pm10, no2, nox, wd, ws)
+```
+
+```{r}
+#| eval: true
+zmienne |> 
+  select(-ozone) |> 
+  pivot_longer(everything(), names_to = "variable", values_to = "value") |> 
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "magenta3") +
+  facet_wrap(~variable, scales = "free") +
+  labs(title = "Rozkład zmiennych objaśniających")
+```
+
+**Wykresy rozkładów zmiennych objaśniających**
+
+Zmienne `nox`, `no2`, `co`, `pm25`, `so2`, `ws` mają rozkłady prawostronnie skośne.
+
+```{r}
+#| eval: true
+zmienne |> 
+  pivot_longer(-ozone, names_to = "variable", values_to = "value") |> 
+  ggplot(aes(x = ozone, y = value, fill = ozone)) +
+  geom_boxplot() +
+  facet_wrap(~variable, scales = "free_y") +
+  labs(title = "Porównanie rozkładów względem ozonu")
+```
+
+**Rozkłady zmiennych względem ozonu**
+
+Zmienne `nox`, `no2`, `co` mają wyraźnie wyższe wartości dla niskiego poziomu ozonu, co oznacza ujemną korelację.
+
+Zmienne `pm25`, `pm10`, `so2` również mają wyższe wartości dla niskiego poziomu ozonu, jednak różnica miedzy jedną grupą a drugą jest słaba.
+
+Zmienne `wd` i `ws` mają wyższe wartości dla wysokiego poziomu ozonu - korelacja dodatnia.
+
+```{r}
+#| eval: true
+# sprawdzenie korelacji z ozonem
+
+cor <- zmienne |> 
+  mutate(ozone_num = as.numeric(ozone) - 1) |>  
+  select(-ozone) |> 
+  cor(use = "complete.obs") |> 
+  as.data.frame() |> 
+  rownames_to_column("zmienna") |> 
+  filter(zmienna != "ozone_num") |> 
+  select(zmienna, korelacja_z_ozonem = ozone_num) |> 
+  arrange(desc(abs(korelacja_z_ozonem)), korelacja_z_ozonem) |> 
+  mutate(korelacja_z_ozonem = round(korelacja_z_ozonem, 4))
+
+# korelacja nox i no2
+nox_no2_cor <- cor(air$nox, air$no2, use = "complete.obs")
+
+top3zmienne <- cor |> 
+  head(3) |> 
+  pull(zmienna)
+
+list(
+  cor_tabela = knitr::kable(cor, digits = 2),
+  top3_zmienne = top3zmienne
+)
+
+```
+
+**Czy zmienne date, wd, pm10, pm25, so2, coś wnoszą coś do modelu?**
+
+`date`: Nie, jest zmienną czasową i nie ma związku z procesami chemicznymi tworzenia ozonu.
+
+`wd`: (kierunek wiatru): Nie, brak istotnych różnic w rozkładach, korelacja = 0.08.
+
+`pm10/pm25`: Nie, słabe korelacje (-0.29/-0.34) i mało wyraźne różnice w boxplotach.
+
+`so2`: Nie, niska korelacja (-0.37) i brak silnego związku z ozonem.
+
+`co`: Tak/Nie, ma wysoką korelację (-0.44), ale jest silnie związany z nox/no2.
+
+**Jak potraktować no2 i nox?**
+
+Korelacja zmiennych `no2` i `nox` wynosi ok. **0.84**, co oznacz ich współliniowość. W takim wypadku zdecydowałam się wybrać zmienną `nox`, ponieważ ma wyższą korelację z ozonem. 
+
+Ostatecznie do modelu wybrałam zmienną `nox` i `ws`. `ws` nie jest silnie skorelowana z `nox`, ale jest zmienną z dodatnią korelacją z ozonem. 
+
+#### Budowanie modelu
+
+```{r}
+#| eval: true
+set.seed(222)
+air_split <- initial_split(air, strata = "ozone", prop = 0.7)
+air_train <- training(air_split)
+air_test <- testing(air_split)
+
+rec <- recipe(ozone ~ nox + ws, data = air_train) |> 
+  step_YeoJohnson(all_numeric_predictors()) |>  
+  step_normalize(all_numeric_predictors()) 
+
+model <- logistic_reg() |> 
+  set_engine("glm") |> 
+  set_mode("classification")
+
+workflow <- workflow() |> 
+  add_recipe(rec) |> 
+  add_model(model)
+
+model_fit <- fit(workflow, data = air_train)
+
+```
+
+
+**Czy stosować przekształcenia boxCox lub YeoJohnson - dla jakich zmiennych?**
+
+Można zastosować przekształcenie YeoJohnson, ponieważ rozkłady moich zmiennych są skośne oraz występują wartości zero - BoxCox wymaga wartości dodatnich.
+
+**Czy normalizacja zmiennych numerycznych jest potrzebna ?**
+
+W tym przypadku trzeba zachować spójność po przekształceniu YeoJohnson, które sprawia, że zmienne tracą swoją oryginalną jednostkę. Normalizacja pomaga ujednolicić skalę oraz ułatwia interpetację wyników. 
+
+
+#### Ocena modelu
+
+```{r}
+#| eval: true
+ocena_modelu <- air_test |> 
+  bind_cols(
+    predict(model_fit, new_data = air_test),
+    predict(model_fit, new_data = air_test, type = "prob"))
+
+macierz_bledow <- conf_mat(ocena_modelu, truth = ozone, estimate = .pred_class)
+print(macierz_bledow)
+
+metryki <- metric_set(accuracy, sensitivity, specificity, precision, recall, f_meas)
+
+metryki_wynik <- metryki(
+  ocena_modelu,
+  truth = ozone,
+  estimate = .pred_class,
+  .pred_Niskie
+) |> 
+  mutate(.estimate = round(.estimate, 3))
+print(metryki_wynik)
+
+wspolczynniki <- tidy(model_fit) |> 
+  mutate(p.value = round(p.value, 4))
+print(wspolczynniki)
+
+```
+
+**Macierz błędów**
+
+True Negative - 1628, model poprawnie przewidział niskie stężenie ozonu w 1628 przypadkach.
+
+False Positive - 185, model błędnie sklasyfikował wysokie stężenie jako niskie.
+
+False Negative - 101, model błędnie sklasyfikował niskie stężenie jako wysokie.
+
+True Positive - 354, model poprawnie przewdział wysokie stężenie ozonu w 354 przypadkach.
+
+Moj model lepiej poradził sobie w identyfikacji niskich stężeń ozonu. Duża liczba FP wskazuje na to, że model myli wysokie stężenia z niskimi.
+
+**Metryki**
+
+Accuracy - poprawna klasyfikacja 87.4% wszystkich przypadków.
+
+Sensitivity - wykrycie 94.2% przypadków wysokiego ozonu.
+
+Specificity - tylko 65.7% niskich stężeń zostało poprawnie zidentyfikowanych.
+
+Precision - w 89.8% model ma rację przewidując wysokie stężenia.
+
+F1-score - wartość bliska 1 (91.9%) wskazuje na dobrą równowagę miedzy precyzją i czułością.
+
+**Współczynniki**
+
+NOx - Silny ujemny wpływ na stężenie ozonu.
+
+WS - Wyższa prędkość wiatru zwiększa szanse na wysokie stężenie ozonu.
+
+Obie zmienne są istotne statystycznie.
+
+**Model jest skuteczny, jednak specyficzność jest niska. Warto dodać inne zmienne, które mogą ją poprawić, np. temperatura.**
+
+```{r}
+#| eval: true
+wykres_fit <- ggplot(ocena_modelu, aes(x = nox, y = as.numeric(ozone) - 1)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
+              se = FALSE, color = "steelblue") +
+  labs(title = "Dopasowanie modelu do danych",
+       x = "Standaryzowane NOx",
+       y = "Prawdopodobieństwo wysokiego ozonu") +
+  theme_minimal()
+wykres_fit
+```
+
+**Wykres dopasowania modelu**
+
+Krzywa wyraźnie opada, co potwierdza, że wyższe stężenie NOx zmniejsza prawdopodobieństwo wysokiego ozonu. Jest to prawda – NOx reaguje z ozonem, redukując jego stężenie.
+
+Dla niskich wartości NOx prawdopodobieństwo wysokiego ozonu sięga 75–100%, a dla wysokich NOx spada do 0–25%.
+
+Wartości skrajne są jednoznacznie klasyfikowane, a wartości bliskie średniej wymagają dodatkowych zmiennych dla precyzyjniejszej prognozy.
+
+```{r}
+#| eval: true
+wykres_prawdopodobienstw <- ggplot(ocena_modelu, aes(x = .pred_Niskie, fill = ozone)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Rozkład predykowanych prawdopodobieństw",
+       x = "Prawdopodobieństwo niskiego ozonu",
+       y = "Gęstość") +
+  theme_minimal()
+wykres_prawdopodobienstw
+```
+
+**Wykres rozkładu prawdopodobieństw**
+
+Niski ozon: Rozkład skoncentrowany po prawej stronie - wysokie prawopodobieństwa, co oznacza, że model często poprawnie przewiduje niskie stężenia.
+
+Wysoki ozon: Rozkład przesunięty w lewo - niskiee prawdopodobieństwa, co pokazuje, że model rzadko myli wysokie stężenia z niskimi.
+
+Obszar 0.4–0.6 jest niepewny, model może błędnie klasyfikować przypadki.
+
+Ogólnie model dobrze separuje klasy – większość przewidywań skupia się po przeciwnych stronach wykresu. Nakładanie się w środkowym zakresie sugeruje, że dla niektórych przypadków model może wymagać dodatkowych zmiennych lub dostrojenia progu klasyfikacji.
+
+## Ćwiczenie 3
+
+### Pakiety
+
+```{r}
+#| eval: true
+library(tidymodels)
+library(tidyverse)
+library(ranger)
+library(knitr)
+```
+
+### Przygotowanie danych + przepis - takie jak w ćw 2
+
+```{r}
+#| eval: true
+air_train <- training(initial_split(air, strata = "ozone", prop = 0.7))
+
+rec <- recipe(ozone ~ nox + ws, data = air_train) |> 
+  step_YeoJohnson(all_numeric_predictors()) |> 
+  step_normalize(all_numeric_predictors())
+
+```
+
+### Definiowanie modeli
+
+```{r}
+#| eval: true
+logistic_model <- logistic_reg() |> 
+  set_engine("glm") |> 
+  set_mode("classification")
+
+rf_model <- rand_forest() |> 
+  set_engine("ranger", importance = "impurity") |> 
+  set_mode("classification")
+
+```
+
+### Kroswalidacja CV
+
+```{r}
+#| eval: true
+cv_split <- vfold_cv(air_train, v = 5, strata = "ozone")
+
+ocena <- function(model, resamples) {
+  workflow() |> 
+    add_recipe(rec) |> 
+    add_model(model) |> 
+    fit_resamples(
+      resamples = resamples,
+      metrics = metric_set(accuracy, sensitivity, specificity, roc_auc)
+    )}
+
+logistic_cv <- ocena(logistic_model, cv_split)
+rf_cv <- ocena(rf_model, cv_split)
+
+```
+
+### Kroswalidacja V-fold CV
+
+```{r}
+#| eval: true
+vfold_split <- vfold_cv(air_train, v = 20, strata = "ozone")
+
+logistic_vfold <- ocena(logistic_model, vfold_split)
+rf_vfold <- ocena(rf_model, vfold_split)
+
+```
+
+### Bootstrap
+
+```{r}
+#| eval: true
+bstrap_split <- bootstraps(air_train, times = 20, strata = "ozone")
+
+logistic_bstrap <- ocena(logistic_model, bstrap_split)
+rf_bstrap <- ocena(rf_model, bstrap_split)
+
+```
+
+### Podsumowanie
+
+```{r}
+#| eval: true
+wyniki_resampling <- bind_rows(
+  collect_metrics(logistic_cv) |> mutate(model = "Reg. log.", metoda = "5-CV"),
+  collect_metrics(rf_cv) |> mutate(model = "Random forest", metoda = "5-CV"),
+  collect_metrics(logistic_vfold) |> mutate(model = "Reg. log.", metoda = "20-CV"),
+  collect_metrics(rf_vfold) |> mutate(model = "Random forest", metoda = "20-CV"),
+  collect_metrics(logistic_bstrap) |> mutate(model = "Reg. log.", metoda = "Bootstrap"),
+  collect_metrics(rf_bstrap) |> mutate(model = "Random forest", metoda = "Bootstrap"))
+
+resampling_podsumowanie <- wyniki_resampling |> 
+  select(model, metoda, .metric, mean, std_err) |> 
+  pivot_wider(names_from = .metric, values_from = c(mean, std_err)) |> 
+  arrange(model, metoda)
+
+kable(resampling_podsumowanie, digits = 3, caption = "Porównanie wyników reamplingu dla różnych modeli i metod")
+
+```
+
+Regresja logistyczna osiągnęła lepsze wyniki pod względem dokładności i stabilności - ROC AUC = 0.920. Las losowy ma niższą dokładność i specyficzność, ale również bardzo dobre wyniki - utrzymuje bardzo wysoką czułość. Metoda Bootstrap zapewnia najniższe błędy standardowe, a 20CV szczególnie przy Random Forest poprawiło accuracy i specificy względem 5CV. 
+
+```{r}
+#| eval: true
+# obliczam ROC AUC dla danych testowych do porownania (w cw. 2 tego nie uwzglednilam)
+
+ocena_modelu <- ocena_modelu |> 
+  mutate(.pred_Wysokie = 1 - .pred_Niskie)
+
+ocena_modelu$ozone <- factor(ocena_modelu$ozone, levels = c("Niskie", "Wysokie"))
+
+roc_auc_test <- roc_auc(
+  data = ocena_modelu,
+  truth = ozone,
+  .pred_Wysokie,
+  event_level = "second"
+) |> 
+  mutate(
+    model = "Reg. log. (test)",
+    metoda = "Podział 70/30"
+  )
+
+metryki_test <- metryki_wynik |> 
+    mutate(
+      model = "Reg. log. (test)",
+      metoda = "Podział 70/30"
+    )
+
+metryki_test <- bind_rows(metryki_test, roc_auc_test)
+metryki_full <- metric_set(accuracy, sensitivity, specificity, precision, recall, f_meas, roc_auc)
+
+ocena_z_metrykami <- function(model, resamples) {
+  workflow() |> 
+    add_recipe(rec) |> 
+    add_model(model) |> 
+    fit_resamples(
+      resamples = resamples,
+      metrics = metryki_full
+    )
+}
+
+logistic_cv <- ocena_z_metrykami(logistic_model, cv_split)
+logistic_vfold <- ocena_z_metrykami(logistic_model, vfold_split)
+logistic_bstrap <- ocena_z_metrykami(logistic_model, bstrap_split)
+
+extract_metrics <- function(resample, metoda) {
+  collect_metrics(resample) |> 
+    filter(.metric %in% c("accuracy", "sensitivity", "specificity", "precision", "recall", "f_meas", "roc_auc")) |> 
+    select(.metric, .estimate = mean) |> 
+    mutate(
+      model = "Reg. log. (resampling)",
+      metoda = metoda
+    )
+}
+
+metryki_cv5 <- extract_metrics(logistic_cv, "5-fold CV")
+metryki_cv20 <- extract_metrics(logistic_vfold, "20-fold CV")
+metryki_boot <- extract_metrics(logistic_bstrap, "Bootstrap")
+
+metryki_all <- bind_rows(metryki_test, metryki_cv5, metryki_cv20, metryki_boot)
+
+tabela_porownawcza <- metryki_all |> 
+  pivot_wider(names_from = .metric, values_from = .estimate) |> 
+  arrange(model, metoda)
+
+
+kable(tabela_porownawcza, digits = 3, caption = "Porównanie metryk: zestaw testowy vs reampling")
+
+```
+
+Wyniki modelu regresji logistycznej są bardzo dobre – zarówno na zbiorze testowym, jak i w walidacji resamplingowej. Model osiąga wysoką dokładność ok. 87%, świetną czułość ok. 94% oraz wysoką wartość ROC AUC ok. 0.92, co oznacza skuteczne rozróżnianie klas. Specyficzność jest nieco niższa ok. 66%. Spójność wyników testowych i resamplingowych świadczy o dobrej generalizacji modelu.
+
