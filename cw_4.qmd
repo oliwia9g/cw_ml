@@ -1,0 +1,332 @@
+---
+title: "cw_4"
+author: "Oliwia Grądzka"
+format:
+  html:
+    self-contained: true
+    embed-resources: true
+    toc: true
+    toc-depth: 4
+    toc-location: right
+    toc-title: "Spis Treści"
+    number-sections: true
+    number-depth: 4
+    code-fold: show
+    code-summary: "show the code"
+    code-tools: true
+    code-block-bg: true
+    code-block-border-left: "black"
+    code-line-numbers: false
+    code-copy: true
+    html-math-method: katex
+    smooth-scroll: true
+    anchor-sections: true
+    link-external-icon: true
+    link-external-newwindow: true
+    theme: 
+      light: cosmo
+      dark: darkly
+    fontsize: 1.1em
+    linestretch: 1.5
+execute: 
+  warning: false
+  echo: true
+  eval: false
+editor_options:
+  chunk_output_type: console
+---
+
+# Wprowadzenie 
+
+```{r}
+#| eval: true
+library(tidymodels)
+
+# Dodatkowe pakiety
+library(rpart.plot)  # wizualizacja drzew decyzyjnych 
+library(vip)         # wykres wagi zmiennych
+```
+
+```{r}
+#| eval: true
+data("cells", package = "modeldata")
+cells
+
+set.seed(123)
+split <- initial_split(data = cells |> select(-case), 
+                       prop = 3/4, 
+                       strata = class)
+
+train <- training(split)
+test <- testing(split)
+
+tune_spec <- 
+  decision_tree(
+    cost_complexity = tune(), 
+    tree_depth = tune()) |> 
+  set_engine("rpart") |> 
+  set_mode("classification")
+
+tune_spec
+
+siatka <- grid_regular(cost_complexity(), 
+                       tree_depth(), 
+                       levels = 5)
+siatka
+
+# podgląd parametrów 
+
+siatka |> 
+  count(tree_depth)
+
+siatka |> 
+  count(cost_complexity)
+
+```
+
+```{r}
+#| eval: true
+set.seed(234)
+folds <- vfold_cv(train)
+
+```
+
+```{r}
+#| eval: true
+set.seed(345)
+
+# workflow
+
+work <- 
+  workflow() |> 
+  add_model(tune_spec) |> 
+  add_formula(class ~ .)
+
+# statystyki oceny dokładnosci modelu 
+
+miary_oceny <-
+  yardstick::metric_set(# tym parametrem możesz definiować
+    accuracy,
+    mcc,
+    npv,
+    roc_auc)
+
+# Optymalizacja 
+
+fit_tree <-
+  work |>
+  tune_grid(
+    resamples = folds,
+    grid = siatka,
+    metrics = miary_oceny
+  )
+
+fit_tree
+
+fit_tree |> collect_metrics()
+fit_tree %>%
+  collect_metrics() %>%
+  mutate(tree_depth = factor(tree_depth)) %>%
+  ggplot(aes(cost_complexity, mean, color = tree_depth)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) +
+  scale_x_log10(labels = scales::label_number()) +
+  scale_color_viridis_d(option = "plasma", begin = .9, end = 0)
+
+fit_tree |> show_best(metric="accuracy")
+fit_tree |> select_best(metric="accuracy")
+
+best_mod <- fit_tree |> select_best(metric="accuracy")
+
+final_mod <-  
+  work |> 
+  finalize_workflow(best_mod)
+
+final_fit <- 
+  final_mod |> 
+  last_fit(split = split)
+
+final_fit %>%
+  collect_metrics()
+
+final_fit |> 
+  collect_predictions() |> 
+  roc_curve(truth = class, .pred_PS) |> 
+  autoplot()
+
+final_fit |> extract_workflow()
+
+final_fit |> 
+  extract_workflow() |> 
+  extract_fit_engine() |> 
+  rpart.plot(roundint = F)
+
+# wykres 
+
+final_fit |> 
+  extract_workflow() |> 
+  extract_fit_parsnip() |>
+  vip() 
+
+# eksport danych do tabeli
+
+final_fit |>
+  extract_workflow() |>
+  extract_fit_parsnip() |>
+  vip() |> 
+  _$data |> 
+  knitr::kable(digits = 1)
+
+```
+
+# Ćwiczenie 4
+
+## Pakiety
+```{r}
+#| eval: true
+library(tidymodels)
+library(rpart.plot)  
+library(vip)     
+library(ggplot2)
+library(scales)
+
+```
+
+## Wykonanie
+
+```{r}
+#| eval: true
+args(decision_tree)
+
+```
+
+Hiperparametry decision tree to:
+
+* cost_complexity - dodaje karę za złożoność drzewa, im większa wartość, tym bardziej przycięte drzewo),
+
+* tree_depth - maksymalna głębokość drzewa,
+
+* min_n - minimalna liczba obserwacji w węźle - ten parametr będę stroić.
+
+```{r}
+#| eval: true
+tune_spec_min_n <- 
+  decision_tree(
+    min_n = tune()
+  ) |> 
+  set_engine("rpart") |> 
+  set_mode("classification")
+
+siatka_min_n <- grid_regular(min_n(range = c(2, 40)), levels = 10)
+siatka_min_n
+
+```
+
+```{r}
+#| eval: true
+set.seed(234)
+folds <- vfold_cv(train)
+
+work_min_n <- 
+  workflow() |> 
+  add_model(tune_spec_min_n) |> 
+  add_formula(class ~ .)
+
+miary_oceny <- 
+  metric_set(
+    accuracy,
+    mcc,
+    npv,
+    roc_auc)
+```
+
+```{r}
+#| eval: true
+set.seed(345)
+fit_min_n <- 
+  tune_grid(
+    object = work_min_n,
+    resamples = folds,
+    grid = siatka_min_n,
+    metrics = miary_oceny
+  )
+
+fit_min_n |> show_best(metric="accuracy")
+
+```
+
+## Podsumowanie
+
+```{r}
+#| eval: true
+best_mod_min_n <- fit_min_n |> select_best(metric="accuracy")
+
+final_mod_min_n <- 
+  work_min_n |> 
+  finalize_workflow(best_mod_min_n)
+
+final_fit_min_n <- 
+  final_mod_min_n |> 
+  last_fit(split = split)
+
+final_fit_min_n |> collect_metrics()
+
+final_fit_min_n |> 
+  extract_workflow() |> 
+  extract_fit_engine() |> 
+  rpart.plot(roundint = FALSE)
+
+final_fit_min_n |> 
+  extract_workflow() |> 
+  extract_fit_parsnip() |> 
+  vip()
+
+fit_min_n |> 
+  collect_metrics() |> 
+  ggplot(aes(x = min_n, y = mean)) +
+  geom_line(color = "steelblue", size = 1.2) +
+  geom_point(color = "purple", size = 2) +
+  facet_wrap(~ .metric, scales = "free_y") +
+  labs(
+    title = "Wpływ min_n na jakość modelu",
+    x = "min_n",
+    y = "Średnia wartość metryki"
+  ) +
+  theme_minimal(base_size = 13)
+
+final_fit_min_n |> 
+  collect_predictions() |> 
+  roc_curve(truth = class, .pred_PS) |> 
+  autoplot() +
+  labs(
+    title = "Krzywa ROC dla najlepszego modelu z min_n"
+  ) +
+  theme_minimal(base_size = 13)
+
+# porownanie z cost_complexity + tree_depth
+final_fit|> collect_metrics()
+final_fit_min_n |> collect_metrics()
+
+extract_workflow(final_fit) |> extract_spec_parsnip()
+extract_workflow(final_fit_min_n) |> extract_spec_parsnip()
+
+final_fit|> extract_fit_engine() |> rpart.plot(main = "Drzewo – cost_complexity + tree_depth")
+final_fit_min_n |> extract_fit_engine() |> rpart.plot(main = "Drzewo – min_n")
+
+final_fit_min_n |>
+  extract_workflow() |>
+  extract_fit_parsnip() |>
+  vip() |> 
+  _$data |> 
+  knitr::kable(digits = 1)
+
+```
+
+Parametr `min_n` określa minimalną liczbę obserwacji, które muszą znaleźć się w węźle, aby drzewo mogło dokonać podziału. Można nim kontrolować złożoność modelu i ryzyko przeuczenia, co sprawia, że ma istotny wpływ na wydajność modelu. 
+
+Zbyt małe wartości `min_n` np. mniejsze niż 10, prowadzą do rozbudowanych drzew, które mają dobre wyniki na danych treningowych, ale mogą przeuczyć niereprezentatywne dane. 
+
+Zbyt duże wartości `min_n` np. powyżej 30. ograniczają liczbę podziałów, więc drzewo staje się uproszczone i nie dopasowuje się do danych.Kompromisem są więc wartości z zakresu 20-30. W tym przypadku najlepszy wynik uzyskałam dla wartości min_n = 23. 
+
+W przeciwieństwie do pozostałych parametrów, `min_n` ma bezpośredni wpływ na strukturę podziałow w drzewie. 
